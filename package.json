@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "new:tech-article": "npx zenn new:article --type tech"
   },
   "repository": {
     "type": "git",
