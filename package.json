@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "new:tech-article": "npx zenn new:article --type tech"
+    "new:tech-article": "npx zenn new:article --type tech",
+    "preview": "npx zenn preview"
   },
   "repository": {
     "type": "git",
