@@ -60,7 +60,7 @@ Format: Symbols
 Using path `path/to/.wasmer/lib/libwasmer.a` as libwasmer path.
 ✔ Native executable compiled successfully to `./hello-wasm`.
 
-# ELFが吐き出されてる！
+# ELFが吐き出されている！
 $ file ./hello-wasm
 ./hello-wasm: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=e711e868f565ae2700255306b13be52fa929990c, for GNU/Linux 3.2.0, with debug_info, not stripped
 
@@ -68,16 +68,18 @@ $ file ./hello-wasm
 $ ./hello-wasm
 Hello, Wasm!
 ```
-本当にできてしまった。(当たり前)
+本当にできてしまった。(それはそう)
 実際に生成できることが確認できた所で、もう少し深く調べていく。
 
-# どうやって生成してる？
+# 深堀っていく
+
+## どうやって生成してる？
 最初に気になるのは、そもそもどうやってWasmバイナリから実行ファイルを生成しているのか。
 `Wasmer`のコードから深堀してみる。
 
-# バイナリサイズは？
+## バイナリサイズは？
 
-# パフォーマンスは？
+## パフォーマンスは？
 
 # 最後に
 
