@@ -16,9 +16,9 @@ https://wasmer.io/posts/announcing-wasmer-3.0
 これは調べるしかないということで、今回は**Wamserを使った実行バイナリの美味しい作り方**を深堀りしていこうと思う。
 
 # とりあえず作ってみる
-まずはやってみないと何もわからないので、とりあえず`Wasmer`の`3.0`をインストールして使ってみる。
+まずはやってみないと何もわからないので、とりあえず`Wasmer`の`3.0.0`をインストールして使ってみる。
 
-## Wasmer 3.0をビルド
+## Wasmer 3.0.0をビルド
 ```shell
 # wasmerをクローン(クローン済みの場合はスキップ)
 $ git clone https://github.com/wasmerio/wasmer.git
@@ -58,8 +58,8 @@ Hello, Wasm!
 $ file ./hello-wasm.wasm
 ./hello-wasm.wasm: WebAssembly (wasm) binary module version 0x1 (MVP)
 
-# create-exeを実行
-# -o で出力ファイルを指定
+# `create-exe`を実行
+# `-o`で出力ファイルを指定
 $ wasmer create-exe hello-wasm.wasm -o ./hello-wasm
 Compiler: cranelift
 Target: x86_64-unknown-linux-gnu
@@ -147,13 +147,14 @@ self.link(
 CやRustなどのコンパイラで直接生成した実行バイナリと比べてサイズはどれくらい違うのか？
 もちろん「言語やコンパイラによって違う」と言ってしまえばそれまでなのだが、雰囲気だけでも知りたいのでちょっと調べてみる。
 
-コードは愛も変わらずこれ。
+コードはあいも変わらずこのスパゲッティ。(スパゲッティとは)
 ```rust
 fn main() {
     println!("Hello, Wasm!");
 }
 ```
 
+ビルドしてサイズを見てみる。(ビルド手順は割愛)
 ```shell
 # まずはRustコンパイラから直接ビルドした実行バイナリ
 $ ./target/debug/hello-wasm
@@ -196,7 +197,7 @@ fn main() {
 }
 ```
 
-ビルドして計測。(ビルドのコマンドは割愛)
+ビルドして計測。(ビルド手順は割愛)
 ```shell
 # Rustで直接生成したバイナリ
 $ time -p ./target/debug/fib > /dev/null
