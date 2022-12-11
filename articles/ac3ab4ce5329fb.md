@@ -15,8 +15,8 @@ https://wasmer.io/posts/announcing-wasmer-3.0
 
 これは調べるしかないということで、今回は**Wamserを使った実行バイナリの美味しい作り方**を深堀りしていこうと思う。
 
-# とりあえず使ってみる
-まずは使ってみないと何もわからないので、とりあえず`Wasmer`の`3.0`をインストールして使ってみる。
+# とりあえず作ってみる
+まずはやってみないと何もわからないので、とりあえず`Wasmer`の`3.0`をインストールして使ってみる。
 
 ## Wasmer 3.0をビルド
 ```shell
@@ -32,10 +32,10 @@ $ make build-wasmer
 $ ./target/release/wasmer --version
 wasmer 3.0.0
 ```
-あとは実行しやすいように適当にパスが通しておきます。
+あとはお好みで、実行しやすいように適当にパスを通しておく。
 
 ## Wasmバイナリを用意
-[Wasm(バイナリ)を読む](https://zenn.dev/0kate/articles/7716f37f7fc327)の時に使ったスパゲッティコードをそのまま使う。
+[Wasm(バイナリ)を読む](https://zenn.dev/0kate/articles/7716f37f7fc327)の時に使ったスパゲッティをそのまま使う。(スパゲッティとは)
 ```rust
 fn main() {
     println!("Hello, Wasm!");
@@ -46,6 +46,7 @@ $ cargo build --target wasm32-wasi
 $ wasmer target/wasm32-wasi/debug/hello-wasm.wasm
 Hello, Wasm!
 ```
+ここまでで下準備は終わり。
 
 ## Wasmバイナリから実行バイナリを生成
 ここから新しく追加された`create-exe`サブコマンドで実行バイナリを生成していく。
