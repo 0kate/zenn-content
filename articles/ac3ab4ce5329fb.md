@@ -180,6 +180,7 @@ Format: Symbols
 こちらはおそらく、直接Wasmバイナリからネイティブの実行ファイルに変換するコンパイラ。
 ([`One-pass Compiler`](https://en.wikipedia.org/wiki/One-pass_compiler)と置き換えてもだいたい同義？)
 このコンパイラのメリットとしては、**コンパイルにかける手間が比較的少ないためコンパイルにかかる時間が推測しやすい**というところ。
+ただ、コンパイル時間は後述の2つより圧倒的に速いものの、実行時のパフォーマンスは遅いらしい。
 こういった一貫したコンパイル時間は、ブロックチェーンの分野などで有効らしい。(ブロックチェーンそこまで詳しくないのでちょっとイメージついていない)
 
 ##### [`Crafnelift`](https://github.com/wasmerio/wasmer/tree/master/lib/compiler-cranelift)
@@ -197,6 +198,7 @@ Format: Symbols
 とりあえず「デフォルトで使われるから」という理由だけではあるが、`Cranelift`でのコンパイルをもう少し見ていこうと思う。
 オブジェクトファイルを生成する際に先のコンパイラの`compile_module`というメソッドが呼ばれるわけだが、`Cranelift`でのコンパイルの場合は[`wasmer/lib/compiler-cranelift/src/compiler.rs:62`](https://github.com/wasmerio/wasmer/blob/master/lib/compiler-cranelift/src/compiler.rs#L62)に実装がある。
 
+
 ### ヘッダーファイルの作り方 (`generate_header_file`)
 ```rust
 let header_file_src = crate::c_gen::staticlib_header::generate_header_file(
@@ -205,9 +207,290 @@ let header_file_src = crate::c_gen::staticlib_header::generate_header_file(
     metadata_length,
 );
 ```
-次はヘッダーファイルが生成される所を見ていく。ここのそれらしい関数は`generate_header_file`で、実態は[`wasmer/lib/cli/src/c_gen/staticlib_header.rs:72`](https://github.com/wasmerio/wasmer/blob/ec959640a301733360d2c1b91516e1aa47be9de3/lib/cli/src/c_gen/staticlib_header.rs#L72)にある。
+次はヘッダーファイルが生成される所を見ていく。ここのそれらしい関数は`generate_header_file`で、実装は[`wasmer/lib/cli/src/c_gen/staticlib_header.rs:72`](https://github.com/wasmerio/wasmer/blob/ec959640a301733360d2c1b91516e1aa47be9de3/lib/cli/src/c_gen/staticlib_header.rs#L72)にある。
+この関数の役割は、Wasmバイナリから生成したオブジェクトファイルのシンボル情報をもとに、ヘッダーファイルに書かれるべきCのソースコードを列挙して、実際にヘッダーファイルの生成を行う`generate_c`関数に引き渡すことみたい。
+```rust
+pub fn generate_header_file(
+    module_info: &ModuleInfo,
+    symbol_registry: &dyn SymbolRegistry,
+    metadata_length: usize,
+) -> String {
+    let mut c_statements = vec![
+        CStatement::LiteralConstant {
+            value: "#include \"wasmer.h\"\n#include <stdlib.h>\n#include <string.h>\n\n"
+                .to_string(),
+        },
+        CStatement::LiteralConstant {
+            value: "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n".to_string(),
+        },
+
+    ...(長いので省略)
+
+    c_statements.push(CStatement::LiteralConstant {
+        value: "\n#ifdef __cplusplus\n}\n#endif\n\n".to_string(),
+    });
+
+    generate_c(&c_statements)
+}
+```
+たしかにCのソースコードを文字列として含んだデータ型が`push`されまくっている。
+
+実際に生成している`generate_c`は[`wasmer/lib/cli/src/c_gen/mod.rs:346`](https://github.com/wasmerio/wasmer/blob/ec959640a301733360d2c1b91516e1aa47be9de3/lib/cli/src/c_gen/mod.rs#L346)に書いてある。
+```rust
+pub fn generate_c(statements: &[CStatement]) -> String {
+    let mut out = String::new();
+    for statement in statements {
+        statement.generate_c(&mut out);
+    }
+    out
+}
+```
+ここは思っていたよりかなり薄く作られており、直前で列挙された「書き出されるべきソースコード文」の一覧に対して一つずつ`generate_c`メソッドを呼び出しているだけみたい。
+引数で渡している文字列に、文ごとの文字列を末尾に追加してもらっている様子。
+
+それぞれのソースコード文の`generate_c`は文の特性に応じて処理が分岐しており、例えば宣言文の場合はこんな感じ。
+```rust
+impl CStatement {
+    /// Generate C source code for the given CStatement.
+    fn generate_c(&self, w: &mut String) {
+        match &self {
+            Self::Declaration {
+                name,
+                is_extern,
+                is_const,
+                ctype,
+                definition,
+            } => {
+                if *is_const {
+                    w.push_str("const ");
+                }
+                if *is_extern {
+                    w.push_str("extern ");
+                }
+                ctype.generate_c_with_name(name, w);
+                if let Some(def) = definition {
+                    w.push_str(" = ");
+                    def.generate_c(w);
+                }
+                w.push(';');
+                w.push('\n');
+            }
+    ...
+```
+なるほど。たしかに、めちゃくちゃCのソースコードで文字列作っている。
+ここでまた呼び出しの根っこに戻るが、こうして作られた文字列が最終的に`static_defs.h`というファイルに書き込まれるということになっている。
+```rust
+let header_file_src = crate::c_gen::staticlib_header::generate_header_file(
+    &module_info,
+    &*symbol_registry,
+    metadata_length,
+);
+...
+// Write down header file that includes pointer arrays and the deserialize function
+let mut writer = BufWriter::new(File::create("static_defs.h")?);
+writer.write_all(header_file_src.as_bytes())?;
+writer.flush()?;
+```
 
 ### リンク (`link`)
+ここまででもなかなかお腹いっぱいな感じがあるが、最後にここまで作ってきた`funciton.o`と`static_defs.h`を使ってリンクして仕上げていく作業が残っている。
+```rust
+self.link(
+    output_path,                                   // これは出力先のパス
+    object_file_path,                              // これが生成されたオブジェクトファイルである`function.o`のパス
+    std::path::Path::new("static_defs.h").into(),  // これが生成されたヘッダーファイルである`static_defs.h`のパス
+    &[],
+    None,
+    None,
+)?;
+```
+実際に`link`していく処理が書かれているのは[`wasmer/lib/cli/src/commands/create_exe.rs:1041`](https://github.com/wasmerio/wasmer/blob/master/lib/cli/src/commands/create_exe.rs#L1041)。
+ここでやっていることは、ざっくり書くとこんな感じ。
+- ビルド用の一時ディレクトリとして`wasmer-static-compile`を作成
+⬇
+- 作成した一時ディレクトリに、エントリポイントとなるCのソースファイル`wasmer_main.c`を作成
+⬇
+- ビルド時に必要なライブラリ(`libwasmer.a`)の探索と、ヘッダファイル(`wasmer.h`, `wasm.h`)の一時ディレクトリへのコピー
+⬇
+- 一時ディレクトリ内で`cc`コマンドを実行、`main_obj.obj`というオブジェクトファイルを作成
+⬇
+- OSごとのリンク処理を呼び出して、最終的なネイティブの実行バイナリを生成
+
+それぞれ少しずつ深く見ていく。
+
+#### ビルド用の一時ディレクトリを作成
+ここは一時ディレクトリを作っているだけなのでサラッと流す。
+```rust
+        let tempdir = tempdir::TempDir::new("wasmer-static-compile")?;
+        let tempdir_path = tempdir.path();
+```
+
+#### エントリポイントとなるソースファイルを作成
+作成したビルド用の一時ディレクトリに`wasmer_main.c`というファイルを作成。
+ちょっと長いので割愛するが、[`wasmer/lib/cli/src/commands/wasmer_create_exe_main.c`](https://github.com/wasmerio/wasmer/blob/master/lib/cli/src/commands/wasmer_create_exe_main.c)にあるCのコードを書き込んでいる。
+```rust
+        ...
+        let c_src_path = tempdir_path.join("wasmer_main.c");
+        let mut libwasmer_path = get_libwasmer_path()?
+            .canonicalize()
+            .context("Failed to find libwasmer")?;
+        ...
+        if let Some(entrypoint) = pirita_main_atom.as_ref() {
+            let c_code = Self::generate_pirita_wasmer_main_c_static(pirita_atoms, entrypoint);
+            std::fs::write(&c_src_path, c_code)?;
+        } else {
+            std::fs::write(&c_src_path, WASMER_STATIC_MAIN_C_SOURCE)?;
+        }
+        ...
+```
+
+#### ビルドに必要なライブラリの探索と、ヘッダーファイルのコピー
+まずは共有ライブラリ`libwasmer.a`の探索。`WASMER_DIR`(デフォルトで`$HOME/.wasmer`)から探している。
+```rust
+        ...
+        let mut libwasmer_path = get_libwasmer_path()?
+            .canonicalize()
+            .context("Failed to find libwasmer")?;
+
+        let lib_filename = libwasmer_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        libwasmer_path.pop();
+        ...
+```
+
+次にヘッダーファイル`wasmer.h`, `wasm.h`のコピー。これも`WASMER_DIR`にある。
+```rust
+        ...
+        let wasmer_include_dir = get_wasmer_include_directory()?;
+        let wasmer_h_path = wasmer_include_dir.join("wasmer.h");
+        if !wasmer_h_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Could not find wasmer.h in {}",
+                wasmer_include_dir.display()
+            ));
+        }
+        let wasm_h_path = wasmer_include_dir.join("wasm.h");
+        if !wasm_h_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Could not find wasm.h in {}",
+                wasmer_include_dir.display()
+            ));
+        }
+        std::fs::copy(wasmer_h_path, header_code_path.join("wasmer.h"))?;
+        std::fs::copy(wasm_h_path, header_code_path.join("wasm.h"))?;
+        ...
+```
+
+#### `cc`コマンドを実行して`main_obj.obj`を生成
+```rust
+        let compilation = {
+            Command::new("cc")
+                .arg("-c")
+                .arg(&c_src_path)
+                .arg(if linkcode.optimization_flag.is_empty() {
+                    "-O2"
+                } else {
+                    linkcode.optimization_flag.as_str()
+                })
+                .arg(&format!("-L{}", libwasmer_path.display()))
+                .arg(&format!("-l:{}", lib_filename))
+                //.arg("-lwasmer")
+                // Add libraries required per platform.
+                // We need userenv, sockets (Ws2_32), advapi32 for some system calls and bcrypt for random numbers.
+                //#[cfg(windows)]
+                //    .arg("-luserenv")
+                //    .arg("-lWs2_32")
+                //    .arg("-ladvapi32")
+                //    .arg("-lbcrypt")
+                // On unix we need dlopen-related symbols, libmath for a few things, and pthreads.
+                //#[cfg(not(windows))]
+                .arg("-ldl")
+                .arg("-lm")
+                .arg("-pthread")
+                .arg(&format!("-I{}", header_code_path.display()))
+                .arg("-v")
+                .arg("-o")
+                .arg("main_obj.obj")
+                .output()?
+        };
+```
+
+#### OSごとのリンク処理を呼び出してネイティブバイナリを生成
+まずここから実行されて、
+```rust
+        ...
+        let linkcode = LinkCode {
+            object_paths,
+            output_path,
+            ..Default::default()
+        };
+        ...
+        linkcode.run().context("Failed to link objects together")?;
+```
+
+このコードが呼ばれる。
+```rust
+impl LinkCode {
+    fn run(&self) -> anyhow::Result<()> {
+        let libwasmer_path = self
+            .libwasmer_path
+            .canonicalize()
+            .context("Failed to find libwasmer")?;
+        println!(
+            "Using path `{}` as libwasmer path.",
+            libwasmer_path.display()
+        );
+        let mut command = Command::new(&self.linker_path);
+        let command = command
+            .arg("-Wall")
+            .arg(&self.optimization_flag)
+            .args(
+                self.object_paths
+                    .iter()
+                    .map(|path| path.canonicalize().unwrap()),
+            )
+            .arg(&libwasmer_path);
+        let command = if let Some(target) = &self.target {
+            command.arg("-target").arg(format!("{}", target))
+        } else {
+            command
+        };
+        // Add libraries required per platform.
+        // We need userenv, sockets (Ws2_32), advapi32 for some system calls and bcrypt for random numbers.
+        #[cfg(windows)]
+        let command = command
+            .arg("-luserenv")
+            .arg("-lWs2_32")
+            .arg("-ladvapi32")
+            .arg("-lbcrypt");
+        // On unix we need dlopen-related symbols, libmath for a few things, and pthreads.
+        #[cfg(not(windows))]
+        let command = command.arg("-ldl").arg("-lm").arg("-pthread");
+        let link_against_extra_libs = self
+            .additional_libraries
+            .iter()
+            .map(|lib| format!("-l{}", lib));
+        let command = command.args(link_against_extra_libs);
+        let command = command.arg("-o").arg(&self.output_path);
+        let output = command.output()?;
+
+        if !output.status.success() {
+            bail!(
+                "linking failed with: stdout: {}\n\nstderr: {}",
+                std::str::from_utf8(&output.stdout)
+                    .expect("stdout is not utf8! need to handle arbitrary bytes"),
+                std::str::from_utf8(&output.stderr)
+                    .expect("stderr is not utf8! need to handle arbitrary bytes")
+            );
+        }
+        Ok(())
+    }
+}
+```
 
 ## バイナリサイズは？
 次はバイナリサイズの所。
