@@ -6,12 +6,12 @@ topics: ['rust', 'webassembly', 'wasm']
 published: false
 ---
 # Wasmを使った美味しい実行バイナリの作り方
-最近、Wasmランタイムの1つである`Wasmer`のバージョン`3.0.0`がリリースされ、色々と機能が追加された。
+最近Wasmランタイムの1つである`Wasmer`のバージョン`3.0.0`がリリースされ、色々と機能が追加された。
 https://wasmer.io/posts/announcing-wasmer-3.0
 
 その中でも個人的に特に気になったのが、`Support for creating native executables for any platform`という記載。([ニュース](https://www.publickey1.jp/blog/22/wasmwinmaclinuxwasmer_30.html)でも取り上げられていた)
 どうやら、`Wasm`バイナリからOSのネイティブバイナリを生成できるようになったらしい。
-そもそもどうやって生成してる？とか、CやRustのコンパイラから直接生成したときと比べてパフォーマンスはどうなる？バイナリサイズは？Wasmからネイティブバイナリが生成できてどんな所が嬉しいのか？などなど、色々と気になった。
+そもそもどうやって生成してる？とか、CやRustのコンパイラから直接生成したときと比べてパフォーマンスはどうなる？バイナリサイズは？などなど、色々と気になった。
 
 これは調べるしかないということで、今回は**Wamserを使った美味しいネイティブバイナリの作り方**を深堀りしていこうと思う。
 
@@ -93,7 +93,7 @@ Hello, Wasm!
 ⬇
 - Cのコンパイラ/リンカでネイティブの実行バイナリを組み立て
 
-さらにその直後にもう少し細かい記載がある。
+さらにその後にもう少し細かい記載がある。
 > 1. First, we adapted the engine, allowing Wasmer load code directly from native objects-symbols that are linked at runtime. The Engine first generates a native object file for a given .wasm file (.o in Linux / macOS or .obj in Windows).
 > 2. Once the object file is generated, we generate a header file that links its contents to certain variables at compilation time and plugs them into the Engine with Engine::deserialize_object.
 > 3. And once that happens, we just need to use the Wasm-C-API that we all love to interact with this Wasm file!
@@ -109,6 +109,7 @@ Hello, Wasm!
 
 たしかに[`create_exe.rs:287`](https://github.com/wasmerio/wasmer/blob/master/lib/cli/src/commands/create_exe.rs#L287)辺りで、オブジェクトファイルとヘッダーを生成していそうなコードが確認できる。
 ```rust
+...
 let (module_info, obj, metadata_length, symbol_registry) =
     Artifact::generate_object(
         compiler, &data, prefixer, &target, tunables, features,
@@ -119,10 +120,12 @@ let header_file_src = crate::c_gen::staticlib_header::generate_header_file(
     &*symbol_registry,
     metadata_length,
 );
+...
 ```
 
 リンクしているのは[`create_exe.rs:319`](https://github.com/wasmerio/wasmer/blob/master/lib/cli/src/commands/create_exe.rs#L319)らへん。
 ```rust
+...
 self.link(
     output_path,
     object_file_path,
@@ -131,20 +134,29 @@ self.link(
     None,
     None,
 )?;
+...
 ```
 
-まだまだ全然浅いのでもう少し深く見ていく。
+それぞれもう少し深く見ていく。
 
 ### オブジェクトファイルの作り方 (`generate_object`)
 ```rust
+...
 let (module_info, obj, metadata_length, symbol_registry) =
     Artifact::generate_object(
         compiler, &data, prefixer, &target, tunables, features,
     )?;
+...
 ```
 先の`generate_object`部分がオブジェクトファイルを生成しているであろう場所なわけだが、その実態は[`wasmer/lib/compiler/src/engine/artifact.rs:472`](https://github.com/wasmerio/wasmer/blob/46328d5b2212d4ff438d7ba0114100200e89451a/lib/compiler/src/engine/artifact.rs#L472)にある。
+
 その中でも割と重要そうな部分がこの辺。
 ```rust
+        ...
+        #[allow(dead_code)]
+        let (compile_info, function_body_inputs, data_initializers, module_translation) =
+            Self::generate_metadata(data, compiler, tunables, features)?;
+        ...
         let compilation: wasmer_types::compilation::function::Compilation = compiler
             .compile_module(
                 target,
@@ -159,15 +171,17 @@ let (module_info, obj, metadata_length, symbol_registry) =
 
         emit_compilation(&mut obj, compilation, &symbol_registry, target_triple)
             .map_err(to_compile_error)?;
+        ...
 ```
+それぞれ深ぼっていく前に、ここで`compiler`というものが出てくるがので、これについて少しだけ見ていく。
 
-ここで`compiler`というものが出てくるがこれは呼び出し元から渡されているもので、`create-exe`を実行したときに何が使われているのか出力されている。
+ここで言うコンパイラというのはその名の通り、Wasmバイナリを何かしらの方法でプラットフォームごとのバイナリに変換する役割を持つ。
+`create-exe`の時に何が使われているのかは、実行時の出力で確認できる。
 ```shell
 Compiler: cranelift  # <= これ
 Target: x86_64-unknown-linux-gnu
 Format: Symbols
 ```
-どうやらこのコンパイラが実際のオブジェクトコードを生成している様子。
 
 #### `Wasmer`のコンパイラ事情
 ここまでの通り、Wasmからネイティブバイナリを生成するためにコンパイラを挟むことになるわけだが、現在`Wasmer`では以下の3種類のコンパイラに対応している。
@@ -181,7 +195,7 @@ Format: Symbols
 ([`One-pass Compiler`](https://en.wikipedia.org/wiki/One-pass_compiler)と置き換えてもだいたい同義？)
 このコンパイラのメリットとしては、**コンパイルにかける手間が比較的少ないためコンパイルにかかる時間が推測しやすい**というところ。
 ただ、コンパイル時間は後述の2つより圧倒的に速いものの、実行時のパフォーマンスは遅いらしい。
-こういった一貫したコンパイル時間は、ブロックチェーンの分野などで有効らしい。(ブロックチェーンそこまで詳しくないのでちょっとイメージついていない)
+こういった一貫したコンパイル時間は、ブロックチェーンの分野などで有効とのこと。(ブロックチェーンそこまで詳しくないのでちょっとイメージついていない)
 
 ##### [`Crafnelift`](https://github.com/wasmerio/wasmer/tree/master/lib/compiler-cranelift)
 こちらは`Cranelift IR`(`Cranelift`特有の中間表現)を任意のマシンコードに変換できるコンパイラ。(デフォルト使われるのもこれ)
@@ -192,12 +206,133 @@ Format: Symbols
 ##### [`LLVM`](https://github.com/wasmerio/wasmer/tree/master/lib/compiler-llvm)
 言わずとしれた、`Clang`とかの裏側でバックエンドコンパイラとして使われていたりする超有名なコンパイラ。
 `LLVM`専用の中間表現からプラットフォーム固有のネイティブバイナリに変換する。
-本番環境でWasmを利用する際は、ネイティブコード並みにパフォーマンスも最大化できる点からこのコンパイラが推奨とのこと。(実績も豊富なコンパイラだしこれは納得)
+本番環境でWasmを利用する際はこちらが推奨とのこと。(ネイティブコード並みにパフォーマンスも最大化できる点)
+実績も豊富なコンパイラだしこれは納得。
 
-#### `Cranelift`でのコンパイル
-とりあえず「デフォルトで使われるから」という理由だけではあるが、`Cranelift`でのコンパイルをもう少し見ていこうと思う。
-オブジェクトファイルを生成する際に先のコンパイラの`compile_module`というメソッドが呼ばれるわけだが、`Cranelift`でのコンパイルの場合は[`wasmer/lib/compiler-cranelift/src/compiler.rs:62`](https://github.com/wasmerio/wasmer/blob/master/lib/compiler-cranelift/src/compiler.rs#L62)に実装がある。
+Wasmerで対応しているコンパイラについて調べた所で、先程の処理に戻って少しだけ深く調べていく。
 
+#### `generate_metadata`
+Wasmのバイナリを解析して、以下のメタデータを取得する。
+- テーブルセクション (ELFで言うところの関数やらのシンボル情報に相当)
+- データセクション (ELFで言うところの静的データを書いてある所に相当)
+- コードセクション (ELFで言うところの`.text`とかにある各関数のコードへの参照に相当)
+ちなみにこれらのWasmバイナリに関しては、[Wasm(バイナリ)を読む](https://zenn.dev/0kate/articles/7716f37f7fc327)を読むべし。
+
+#### `compiler.compile_module`
+後述のコンパイラのいずれかから指定されたものの`compile_module`を呼び出す。
+中身をいろいろデフォルメするとこんな感じ。`Cranelift`の中間表現を介して、バイナリにコンパイルしている。(`Cranelift`の変換処理については、`Wasmer`から逸れるので今回は割愛)
+```rust
+    /// Compile the module using Cranelift, producing a compilation result with
+    /// associated relocations.
+    fn compile_module(
+        ...
+    ) -> Result<Compilation, CompileError> {
+        ...
+
+        let mut func_translator = FuncTranslator::new();
+        let (functions, fdes): (Vec<CompiledFunction>, Vec<_>) = function_body_inputs
+        .map(|(i, input)| {
+            ...
+            // WasmのバイナリからCranelift IRに変換する
+            func_translator.translate(
+                module_translation_state,
+                &mut reader,
+                &mut context.func,
+                &mut func_env,
+                i,
+            )?;
+
+            // ここで変換したCranelift IRからバイナリを生成
+            let mut code_buf: Vec<u8> = Vec::new();
+            context
+                .compile_and_emit(&*isa, &mut code_buf)
+                .map_err(|error| CompileError::Codegen(pretty_error(&context.func, error)))?;
+            ...
+
+        // function call trampolines (only for local functions, by signature)
+        // ここではWasmモジュール内の関数シグネチャを生成 (出たなトランポリン)
+        let mut cx = FunctionBuilderContext::new();
+        let function_call_trampolines = module
+            ...
+
+        // dynamic function trampolines (only for imported functions)
+        // ここでは外部から差し込まれる関数への参照を生成 (出たなトランポリン)
+        let mut cx = FunctionBuilderContext::new();
+        let dynamic_function_trampolines = module
+            ...
+```
+以前遭遇したトランポリンがまた出てきたが、これは別でまとめたい。(継続やトランポリン実行に関する文献？を教えていただいたので読んでみた)
+
+#### `emit_data`
+ここは生成したメタデータをプラットフォームごとのフォーマットに落とし込むところ。
+```rust
+pub fn emit_data(
+    obj: &mut Object,
+    name: &[u8],
+    data: &[u8],
+    align: u64,
+) -> Result<(), ObjectError> {
+    let symbol_id = obj.add_symbol(ObjSymbol {
+        name: name.to_vec(),
+        value: 0,
+        size: 0,
+        kind: SymbolKind::Data,
+        scope: SymbolScope::Dynamic,
+        weak: false,
+        section: SymbolSection::Undefined,
+        flags: SymbolFlags::None,
+    });
+    let section_id = obj.section_id(StandardSection::Data);
+    obj.add_symbol_data(symbol_id, section_id, data, align);
+
+    Ok(())
+}
+```
+`obj`は[`object`](https://github.com/gimli-rs/object)クレートのものを使っており、各プラットフォームの実行形式に合わせて読み書きできるインターフェースを提供する構造体。
+
+#### `emit_compilation`
+最後に、生成した実際のコードに相当するバイナリをプラットフォームごとのフォーマットに落としこむ。
+```rust
+pub fn emit_compilation(
+    obj: &mut Object,
+    compilation: Compilation,
+    symbol_registry: &impl SymbolRegistry,
+    triple: &Triple,
+) -> Result<(), ObjectError> {
+    ...
+    // Add sections
+    let custom_section_ids = compilation
+        ...
+
+    // Add functions
+    let function_symbol_ids = function_bodies
+        ...
+
+
+    // Add function call trampolines
+    for (signature_index, function) in compilation.function_call_trampolines.into_iter() {
+        ...
+```
+メタデータのときと同様、`object`クレートを使っている。(というかメタデータを追加したものを引き続き使っている)
+
+こういった処理が行われた後`generate_object`に戻り、最後は生成したオブジェクトコードを`function.o`というファイルに書き込んでいる。
+```rust
+                    ...
+                    let (module_info, obj, metadata_length, symbol_registry) =
+                        Artifact::generate_object(
+                            compiler, &data, prefixer, &target, tunables, features,
+                        )?;
+
+                    ...
+                    // Write object file with functions
+                    let object_file_path: std::path::PathBuf =
+                        std::path::Path::new("functions.o").into();
+                    let mut writer = BufWriter::new(File::create(&object_file_path)?);
+                    obj.write_stream(&mut writer)
+                        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                    writer.flush()?;
+                    ...
+```
 
 ### ヘッダーファイルの作り方 (`generate_header_file`)
 ```rust
@@ -207,8 +342,8 @@ let header_file_src = crate::c_gen::staticlib_header::generate_header_file(
     metadata_length,
 );
 ```
-次はヘッダーファイルが生成される所を見ていく。ここのそれらしい関数は`generate_header_file`で、実装は[`wasmer/lib/cli/src/c_gen/staticlib_header.rs:72`](https://github.com/wasmerio/wasmer/blob/ec959640a301733360d2c1b91516e1aa47be9de3/lib/cli/src/c_gen/staticlib_header.rs#L72)にある。
-この関数の役割は、Wasmバイナリから生成したオブジェクトファイルのシンボル情報をもとに、ヘッダーファイルに書かれるべきCのソースコードを列挙して、実際にヘッダーファイルの生成を行う`generate_c`関数に引き渡すことみたい。
+次はヘッダーファイルが生成される所を見ていく。ここの`generate_header_file`の実装は[`wasmer/lib/cli/src/c_gen/staticlib_header.rs:72`](https://github.com/wasmerio/wasmer/blob/ec959640a301733360d2c1b91516e1aa47be9de3/lib/cli/src/c_gen/staticlib_header.rs#L72)にある。
+この関数の役割は、Wasmバイナリから生成したオブジェクトファイルのシンボル情報をもとに、ヘッダーファイルに書かれるべきCのソースコードを列挙して、実際にヘッダーファイルの生成を行う`generate_c`関数に引き渡すこと。
 ```rust
 pub fn generate_header_file(
     module_info: &ModuleInfo,
@@ -248,7 +383,7 @@ pub fn generate_c(statements: &[CStatement]) -> String {
 ここは思っていたよりかなり薄く作られており、直前で列挙された「書き出されるべきソースコード文」の一覧に対して一つずつ`generate_c`メソッドを呼び出しているだけみたい。
 引数で渡している文字列に、文ごとの文字列を末尾に追加してもらっている様子。
 
-それぞれのソースコード文の`generate_c`は文の特性に応じて処理が分岐しており、例えば宣言文の場合はこんな感じ。
+それぞれのソースコード文の`generate_c`は、文の特性に応じて処理が分岐しており、例えば宣言文の場合はこんな感じ。
 ```rust
 impl CStatement {
     /// Generate C source code for the given CStatement.
@@ -293,7 +428,7 @@ writer.flush()?;
 ```
 
 ### リンク (`link`)
-ここまででもなかなかお腹いっぱいな感じがあるが、最後にここまで作ってきた`funciton.o`と`static_defs.h`を使ってリンクして仕上げていく作業が残っている。
+最後にここまで作ってきた`funciton.o`と`static_defs.h`を使ってリンクして仕上げていく作業が残っている。
 ```rust
 self.link(
     output_path,                                   // これは出力先のパス
@@ -576,19 +711,11 @@ Wasmバイナリから生成した場合だと少しばかり遅くなるみた�
 クロスコンパイルには[Zig](https://ziglang.org/)を使っており、たしかにところどころコードにも`Zig`の記載が見える。
 (最近`Zig`の名前を聞くことも増えてきた気がする。)
 
-# 何が嬉しそう？
-Wasmバイナリのままで済めばそのまま実行すれば良いだけの話なので、「Wasmのポータビリティを享受しつつ、速度面でネイティブバイナリの恩恵も受けたい」というタイミングなら嬉しいかも？
-(そもそもWasm自体がネイティブ並の実行速度を目指している側面もあるが)
-
-## デスクトップアプリとか？
-全然Wasm入門したてで界隈に詳しくないド素人の激浅見解だが、まずは処理量が多いデスクトップアプリとかどうだろう？
-PCゲームや動画編集ソフトなど、処理が複雑でパフォーマンス的にWasmバイナリの実行では物足りないケースとか。
-Linuxをメインで使っていると対応してないソフトウェア(特にPCゲーム)とかもあるが、一度Wasmバイナリとして吐き出すようにすればどのプラットフォームにも対応できるようにはなるし、パフォーマンス的にもネイティブの恩恵を受けられそう。(そもそもLinux上でゲームがしたいのだろうかという点があるが)
-Linux上でWindowsアプリを動かすために`Wine`など使うこともあるが、その代わりにならないだろうか。
-
 # 最後に
-よくよく考えたら、WasmによってあらゆるソフトウェアがWebブラウザに移植されどんどん集約されていく世界線の中で、ある意味逆行しているとも捉えることもできそうな今回の新機能。(実際[SQLite3 WASM/JS](https://www.publickey1.jp/blog/22/sqlite3_wasmjssqlite_340websqlite.html)で、SQLite3とかもWebブラウザ対応が進められていたり)
-この辺について`Wasmer`の技術戦略的なところも気になるきっかけになった。
+ここまで`Wasmer`のWasmバイナリからネイティブバイナリの生成を追ってきて、どのように生成しているのかなんとなく把握できた。(実際「美味しいネイティブバイナリ」が作れたのかという所ではあるが)
+ヘッダーファイルを生成するところとか、なかなか力技なところがこれはこれで良い。
+よくよく考えたら、WasmによってあらゆるソフトウェアがWebブラウザに移植されどんどん集約されていく潮流がある中で、個人的にある意味逆行しているとも捉えられそうな気もする。(実際[SQLite3 WASM/JS](https://www.publickey1.jp/blog/22/sqlite3_wasmjssqlite_340websqlite.html)で、SQLite3とかもWebブラウザ対応が進められていたり)
+この辺について`Wasmer`の技術戦略的なところももう少し真面目に調べてみたくなるきっかけになった。
 
 # Appendix
 - [`Wasmer 3.0`のアナウンス](https://wasmer.io/posts/announcing-wasmer-3.0)
