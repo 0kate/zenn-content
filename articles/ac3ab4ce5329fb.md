@@ -639,33 +639,41 @@ fn main() {
 }
 ```
 
-ビルドしてサイズを見てみる。(ビルド手順は割愛)
+リリースビルドで、`Singlepass`・`Cranelift`・`LLVM`とそれぞれのコンパイラで試してみる。
 ```shell
 # まずはRustコンパイラから直接ビルドしたネイティブバイナリ
-$ ./target/debug/hello-wasm
-Hello, Wasm!
-$ du -h ./target/debug/hello-wasm
-3.8M	./target/debug/hello-wasm
-
-# 次にWasmバイナリから生成したネイティブバイナリ
-$ ./target/wasm32-wasi/debug/hello-wasm
-Hello, Wasm!
-$ du -h ./target/wasm32-wasi/debug/hello-wasm
-29M	./target/wasm32-wasi/debug/hello-wasm
+$ cargo build --release
+$ du -h ./target/release/hello-wasm
+3.8M	./target/release/hello-wasm
 
 # ちなみにWasmバイナリのサイズ
-$ wasmer ./target/wasm32-wasi/debug/hello-wasm.wasm
-Hello, Wasm!
-$ du -h ./target/wasm32-wasi/debug/hello-wasm.wasm
-2.0M	./target/wasm32-wasi/debug/hello-wasm.wasm
+$ cargo build --release --target wasm32-wasi
+$ du -h ./target/wasm32-wasi/release/hello-wasm.wasm
+2.0M	./target/wasm32-wasi/release/hello-wasm.wasm
+
+# Wasmバイナリから生成したバイナリ (Singlepass)
+$ wasmer create-exe ./target/wasm32-wasi/release/hello-wasm.wasm -o ./target/wasm32-wasi-release/hello-wasm-singlepass --singlepass
+$ du -h ./target/wasm32-wasi/release/hello-wasm-singlepass
+29M	./target/wasm32-wasi/release/hello-wasm-singlepass
+
+# Wasmバイナリから生成したバイナリ (Cranelift)
+$ wasmer create-exe ./target/wasm32-wasi/release/hello-wasm.wasm -o ./target/wasm32-wasi-release/hello-wasm-cranelift
+$ du -h ./target/wasm32-wasi/release/hello-wasm-cranelift
+29M	./target/wasm32-wasi/release/hello-wasm-cranelift
+
+# Wasmバイナリから生成したバイナリ (LLVM)
+$ wasmer create-exe ./target/wasm32-wasi/release/hello-wasm.wasm -o ./target/wasm32-wasi-release/hello-wasm-llvm --llvm
+$ du -h ./target/wasm32-wasi/release/hello-wasm-llvm
+29M	./target/wasm32-wasi/release/hello-wasm-llvm
 ```
-Rustのバイナリは大きめと言われるが、それよりもさらに大きい。
-想像してたよりもデカいし「こんなに変わるのか...」と思いつつ、これはどう最適化していけるのか興味深い所。
+Rustのバイナリは大きめと言われるが、Wasmから生成したバイナリはそれよりもさらに大きい。
+「こんなに変わるのか...」と思いつつ、これはどう最適化していけるのか興味深い所。
+裏側で使うコンパイラの違いは特にバイナリサイズには影響しない？
 
 ## パフォーマンスは？
 パフォーマンスについても気になる。
 こちらもCやRustなどのコンパイラで直接生成したネイティブバイナリと比べてどうなのか。
-これもコンパイラによって違うと言ってしまえばそうなのだがやっていく。
+バイナリサイズと同じく、コンパイラによって違うと言ってしまえばそうなのだがとりあえずやっていく。
 
 速度比較でよくある、`n`番目のフィボナッチ数を計算させてみる。
 (とりあえず`n = 45`でやってみる)
@@ -682,28 +690,68 @@ fn main() {
 }
 ```
 
-ビルドして計測。(ビルド手順は割愛)
+ビルドして計測。
+こちらもリリースビルドで、`Singlepass`・`Cranelift`・`LLVM`とそれぞれのコンパイラで試してみる。(ビルドコマンドはほぼ一緒なので割愛)
 ```shell
 # Rustで直接生成したバイナリ
-$ time -p ./target/debug/fib > /dev/null
-real 9.98
-user 9.97
+$ time -p  target/release/fib > /dev/null
+real 3.61
+user 3.56
 sys 0.00
 
-# Wasmから生成したバイナリ
-$ time -p ./target/wasm32-wasi/debug/fib > /dev/null
-real 12.71
-user 12.68
+# ちなみにWasmをそのまま実行した場合
+$ time -p wasmer ./target/wasm32-wasi/release/fib.wasm > /dev/null
+real 5.13
+user 5.17
+sys 0.04
+
+# Wasmから生成したバイナリ (Singlepass)
+$ time -p ./target/wasm32-wasi/release/fib-singlepass > /dev/null
+real 12.30
+user 10.71
+sys 0.08
+
+# Wasmから生成したバイナリ (Cranelift)
+$ time -p ./target/wasm32-wasi/release/fib > /dev/null
+real 4.77
+user 4.70
 sys 0.02
 
-# ちなみにWasmのバイナリを実行した場合
-$ time -p wasmer ./target/wasm32-wasi/debug/fib.wasm > /dev/null
-real 13.55
-user 13.51
+# Wasmから生成したバイナリ (LLVM)
+$ time -p ./target/wasm32-wasi/release/fib-llvm > /dev/null
+real 2.95
+user 2.92
 sys 0.02
 ```
-Wasmバイナリから生成した場合だと少しばかり遅くなるみたい。
+Wasmから生成した場合だと少しだけ遅くなるみたい。
 だがWasmバイナリを実行した場合よりは、変換後のネイティブバイナリの方が速くなるのは言うまでもない。
+`Singlepass`によるコンパイルの場合は、公式の記載通りこの中ではダントツで遅い。
+`LLVM`の場合はダントツで速く、ここはさすがの安定感を感じる。(もちろん実行環境の条件にもよるところもあるだろうが)
+
+## コンパイル速度は？
+ついでにコンパイル時間も気になったので、それぞれのコンパイラで計測してみた。
+```shell
+# Singlepassでのコンパイル
+$ time -p wasmer create-exe ./target/wasm32-wasi/release/hello-wasm.wasm -o ./target/wasm32-wasi/release/hello-wasm-singlepass --singlepass > /dev/null
+real 3.06
+user 2.44
+sys 0.63
+
+# Craneliftでのコンパイル
+$ time -p wasmer create-exe ./target/wasm32-wasi/release/hello-wasm.wasm -o ./target/wasm32-wasi/release/hello-wasm-cranelift
+real 3.08
+user 2.57
+sys 0.62
+
+# LLVMでのコンパイル
+$ time -p wasmer create-exe ./target/wasm32-wasi/release/hello-wasm.wasm -o ./target/wasm32-wasi/release/hello-wasm-llvm --llvm
+real 4.13
+user 6.64
+sys 0.61
+```
+これもだいたい公式の記載どおりで、一番単純な`Singlepass`でのコンパイルが最もコンパイルが速い。
+`LLVM`はこの中では最もコンパイルに時間がかかるが、実行時のパフォーマンスはダントツな所も本番向きというのは納得。
+
 # クロスコンパイルもできるらしい
 なんとクロスコンパイルもできるらしく、例えば「Linuxホスト上でWasmバイナリからexe形式のバイナリを生成する」みたいなこともできるみたい。
 > In Wasmer 3.0 we used the power of Zig for doing cross-compilation from the C glue code into other machines.
@@ -712,10 +760,11 @@ Wasmバイナリから生成した場合だと少しばかり遅くなるみた�
 (最近`Zig`の名前を聞くことも増えてきた気がする。)
 
 # 最後に
-ここまで`Wasmer`のWasmバイナリからネイティブバイナリの生成を追ってきて、どのように生成しているのかなんとなく把握できた。(実際「美味しいネイティブバイナリ」が作れたのかという所ではあるが)
-ヘッダーファイルを生成するところとか、なかなか力技なところがこれはこれで良い。
-よくよく考えたら、WasmによってあらゆるソフトウェアがWebブラウザに移植されどんどん集約されていく潮流がある中で、個人的にある意味逆行しているとも捉えられそうな気もする。(実際[SQLite3 WASM/JS](https://www.publickey1.jp/blog/22/sqlite3_wasmjssqlite_340websqlite.html)で、SQLite3とかもWebブラウザ対応が進められていたり)
-この辺について`Wasmer`の技術戦略的なところももう少し真面目に調べてみたくなるきっかけになった。
+ここまで`Wasmer`のWasmバイナリからネイティブバイナリの生成を追ってきて、どのように生成しているのかなんとなく把握できてとても楽しめた。(実際「美味しいネイティブバイナリ」が作れたのかという所ではあるが)
+ヘッダーファイルを生成するところとか、思ったより力技でこれはこれで良い。
+よくよく考えたら、WasmによっていろいろとWebブラウザに移植されどんどん集約されていっている潮流がある中で、個人的にある意味逆行しているとも捉えられそうな気もする。(自分がわかってないだけかもしれないが)
+実際[SQLite3 WASM/JS](https://www.publickey1.jp/blog/22/sqlite3_wasmjssqlite_340websqlite.html)で、SQLite3とかもWebブラウザ対応が進められていたりというのもあるし。
+この辺について`Wasmer`の技術戦略的なところももう少し真面目に調べてみたいと思った。
 
 # Appendix
 - [`Wasmer 3.0`のアナウンス](https://wasmer.io/posts/announcing-wasmer-3.0)
