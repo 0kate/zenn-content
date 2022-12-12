@@ -2,7 +2,7 @@
 title: "Wasmを使った美味しいネイティブバイナリの作り方"
 emoji: "🍳"
 type: "tech" # tech: 技術記事 / idea: アイデア
-topics: ['rust', 'webassembly', 'wasm']
+topics: ['rust', 'webassembly', 'wasm', 'zig']
 published: false
 ---
 # Wasmを使った美味しい実行バイナリの作り方
