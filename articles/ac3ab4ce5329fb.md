@@ -244,7 +244,8 @@ let compilation: wasmer_types::compilation::function::Compilation = compiler
 ```
 
 `compile_module`の中身をいろいろデフォルメするとこんな感じ。
-`Cranelift`の中間表現を介して、バイナリにコンパイルしている。(`Cranelift`の変換処理については、`Wasmer`から逸れるので今回は割愛)
+`Cranelift`の中間表現を介して、バイナリにコンパイルしている。
+(`Cranelift`の変換処理については、`Wasmer`から逸れるので今回は割愛)
 ```rust
 /// Compile the module using Cranelift, producing a compilation result with
 /// associated relocations.
@@ -285,7 +286,8 @@ fn compile_module(
     let dynamic_function_trampolines = module
         ...
 ```
-以前遭遇したトランポリンがまた出てきたが、これは別でまとめたい。(継続やトランポリン実行に関する文献？を教えていただいたので読んでみた)
+以前遭遇したトランポリンがまた出てきたが、これは別でまとめたい。
+(継続やトランポリン実行に関する文献？を教えていただいて読んでみたので)
 
 #### `emit_data`
 その次は、なにやら`emit`している`emit_data`。
@@ -420,7 +422,7 @@ pub fn generate_c(statements: &[CStatement]) -> String {
     out
 }
 ```
-ここは思っていたよりかなり薄く作られており、直前で列挙された「ヘッダーファイルに書き出されるべきソースコード文」の一覧に対して一つずつ`generate_c`メソッドを呼び出しているだけみたい。
+ここは思っていたよりかなり薄く作られており、直前で列挙された「**ヘッダーファイルに書き出されるべきソースコード文**」の一覧に対して一つずつ`generate_c`メソッドを呼び出しているだけみたい。
 引数で渡している文字列に、文ごとの文字列を末尾に追加してもらっている。
 
 それぞれのソースコード文の`generate_c`は各文の特性に応じて処理が分岐しており、例えば宣言文の場合はこんな感じ。
@@ -453,7 +455,7 @@ impl CStatement {
     ...
 ```
 なるほど。。めちゃくちゃCのソースコードを文字列で作っている。
-ここでまた呼び出し元のに戻り、作られたソースコードは最終的に`static_defs.h`というファイルに書き込まれる。
+ここでまた呼び出し元に戻り、作られたソースコードは最終的に`static_defs.h`というファイルに書き込まれる。
 ```rust
 let header_file_src = crate::c_gen::staticlib_header::generate_header_file(  // ここでヘッダーファイルのソースコードを生成
     &module_info,
@@ -639,7 +641,7 @@ impl LinkCode {
         );
 
         // リンカのコマンドを実行
-        let mut command = Command::new(&self.linker_path);  // Windowsなら`clang`、それ以外なら`cc`
+        let mut command = Command::new(&self.linker_path);  // Windowsなら`clang`、それ以外なら`cc`がデフォルトで使われる
         let command = command
             .arg("-Wall")
             .arg(&self.optimization_flag)
@@ -692,7 +694,7 @@ impl LinkCode {
 
 ## バイナリサイズは？
 バイナリサイズの所。
-CやRustなどのコンパイラで直接生成したネイティブバイナリと比べてサイズはどれくらい違うのか？
+CやRustなどのコンパイラで直接生成したネイティブバイナリと比べて、バイナリのサイズはどれくらい違うのか？
 もちろん「言語やコンパイラによって違う」と言ってしまえばそれまでなのだが、雰囲気だけでも知りたいのでちょっと調べてみる。
 
 コードはあいも変わらずこのスパゲッティ。(スパゲッティとは)
@@ -787,7 +789,7 @@ user 2.92
 sys 0.02
 ```
 Wasmから生成した場合だと少しだけ遅くなるみたい。
-だがWasmバイナリを実行した場合よりは、変換後のネイティブバイナリの方が速くなるのは言うまでもない。
+だが、Wasmをそのまま実行した場合よりは、変換後のネイティブバイナリの方が速くなるのは言うまでもない。
 `Singlepass`によるコンパイルの場合は、公式の記載通りこの中ではダントツで遅い。
 `LLVM`の場合はダントツで速く、ここはさすがの安定感を感じる。(もちろん実行環境の条件にもよるところもあるだろうが)
 
@@ -819,7 +821,27 @@ sys 0.61
 なんとクロスコンパイルもできるらしく、例えば「Linuxホスト上でWasmバイナリからexe形式のバイナリを生成する」みたいなこともできるみたい。
 > In Wasmer 3.0 we used the power of Zig for doing cross-compilation from the C glue code into other machines.
 
-クロスコンパイルには[Zig](https://ziglang.org/)を使っており、たしかにところどころコードにも`Zig`の記載が見える。
+クロスコンパイルには[Zig](https://ziglang.org/)を使っており、所々コードにも`Zig`の記載が見える。
+この辺とか。
+```rust
+...
+
+if let Some(setup) = cross_compilation.as_ref() {
+    // クロスコンパイルなら`Zig`を使う
+    self.compile_zig(
+        output_path,
+        &[object_file_path],
+        &[static_defs_file_path],
+        setup,
+        &atom_names,
+        Some(&entrypoint),
+        Some(volumes_obj_path),
+    )?;
+} else {
+    self.link(
+    ...
+```
+
 (最近`Zig`の名前を聞くことも増えてきた気がする。)
 
 # 最後に
