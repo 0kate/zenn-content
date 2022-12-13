@@ -200,7 +200,7 @@ Format: Symbols
 ただ、コンパイル時間は後述の2つより圧倒的に速いものの、実行時のパフォーマンスは遅いらしい。
 こういった一貫したコンパイル時間は、ブロックチェーンの分野などで有効とのこと。(ブロックチェーンそこまで詳しくないのでちょっとイメージついていない)
 
-##### [`Crafnelift`](https://github.com/wasmerio/wasmer/tree/master/lib/compiler-cranelift)
+##### [`Cranelift`](https://github.com/wasmerio/wasmer/tree/master/lib/compiler-cranelift)
 こちらは、`Cranelift IR`という専用の中間表現を任意のマシンコードに変換するコンパイラ。(デフォルト使われるのもこれ)
 `Wasmtime`とかを持ってる[Bytecode Alliance](https://bytecodealliance.org/)のプロジェクトの一つ。
 このコンパイラの使いどころとしては特に書いてなかったが、開発時のみの使用が推奨らしい。本番では後述のLLVMを使ったほうが良いとのこと。
